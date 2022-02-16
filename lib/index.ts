@@ -18,7 +18,6 @@ export class Gif {
 	quality: number
 	repeat: boolean
 	frames: Frame[]
-	skipOnFail: boolean
 
 	/**
 	 * Create a new gif
@@ -41,7 +40,6 @@ export class Gif {
 		this.quality = 10
 		this.repeat = true
 		this.frames = []
-		this.skipOnFail = true
 	}
 
 	/**
@@ -68,7 +66,7 @@ export class Gif {
 			throw new MAGError('The quality needs to be a number')
 		if (quality <= 0)
 			throw new MAGError('The quality cannot be less than 0')
-		if (quality > 10) throw new MAGError('Quality 10 is the max')
+		if (quality >= 10) throw new MAGError('Quality 10 is the max')
 
 		this.quality = quality
 
@@ -133,13 +131,6 @@ export class Gif {
 		this.repeat = v ?? !this.repeat
 	}
 
-	/**
-	 * Set to true to skip frame on fetch error, false to throw error on fetch error
-	 */
-	setSkipOnFail(v: boolean) {
-		this.skipOnFail = v ?? !this.skipOnFail
-	}
-
 	async render(): Promise<Buffer | void> {
 		if (!this.frames.length)
 			throw new MAGError('There is no frames to make a gif')
@@ -147,6 +138,7 @@ export class Gif {
 		const Canvas = canvas.createCanvas(this.width, this.height)
 		const ctx = Canvas.getContext('2d')
 		const encoder = new GIFEncoder(this.width, this.height)
+		const promises = [];
 
 		encoder.start()
 		encoder.setRepeat(this.repeat ? 0 : -1)
@@ -166,37 +158,19 @@ export class Gif {
 						ctx.fillStyle = Frame.background
 						ctx.fillRect(0, 0, Canvas.width, Canvas.height)
 					} else {
-						const BackgroundImage = await canvas.loadImage(
-							Frame.background
-						)
-
-						ctx.drawImage(
-							BackgroundImage,
-							0,
-							0,
-							Canvas.width,
-							Canvas.height
-						)
+						promises.push(canvas.loadImage(Frame.background))
 					}
 				} else {
-					const Image = await canvas
-						.loadImage(Frame.src)
-						.catch((e) => {
-							if (!this.skipOnFail) throw e
-							ctx.clearRect(0, 0, Canvas.width, Canvas.height)
-							return null
-						})
-					if (!Image) continue
-
-					ctx.drawImage(Image, 0, 0, Canvas.width, Canvas.height)
+					promises.push(canvas.loadImage(Frame.src))
 				}
 			}
-
-			encoder.addFrame(ctx as CanvasRenderingContext2D)
-
-			ctx.clearRect(0, 0, Canvas.width, Canvas.height)
 		}
 
+		for (const Image of await Promise.all(promises)) {
+			ctx.drawImage(Image, 0, 0, Canvas.width, Canvas.height)
+			encoder.addFrame(ctx)
+			ctx.clearRect(0, 0, Canvas.width, Canvas.height)
+		}
 		return encoder.out.getData()
 	}
 }
